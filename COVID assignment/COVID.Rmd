@@ -1,0 +1,106 @@
+---
+title: "COVID Analysis"
+author: "Kevin O'Brien"
+date: "2/13/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+#### Library Importation
+```{r imports, include=TRUE}
+library(tidyverse)
+```
+#### Data Importation
+```{r data_import, include=TRUE}
+url_prefix = "https://raw.githubusercontent.com/CSSEGISandData/COVID-19/master/csse_covid_19_data/csse_covid_19_time_series/"
+file_names = c(
+  "time_series_covid19_confirmed_US.csv", 
+  "time_series_covid19_confirmed_global.csv", 
+  "time_series_covid19_deaths_US.csv", 
+  "time_series_covid19_deaths_global.csv"
+)
+urls = str_c(url_prefix, file_names)
+#I'm only using the US data, so I'm omitting the imports of the world data.
+raw_c_US = read_csv(urls[1], show_col_types = FALSE)
+# raw_c_global = read_csv(urls[2], show_col_types = FALSE)
+raw_d_US = read_csv(urls[3], show_col_types = FALSE)
+# raw_d_global = read_csv(urls[4], show_col_types = FALSE)
+
+c_US = raw_c_US
+d_US = raw_d_US
+```
+### Rationale
+Within a few months of the initial identification of COVID-19, there was observational research suggesting that odds of severe illness and death were substantially higher for individuals with serum vitamin D3 levels which were below the minimums in standard clinical guidelines.
+Assuming no pre-existing deficiency of vitamin D3, people are capable of creating vitamin D3 in response to sunlight exposure.
+So, because total sunlight availability is dependent on latitude (i.e. higher latitudes receive less sunlight) I’m curious if current (as of 2022/February/12) per capita and per case death rates by county in the United States are related to latitude.
+
+Included in the US data are several cruise ships (probably because of their relation to territorial waters at the time) island territories which are not states, and the District of Columbia which I’ve elected to exclude because DC is uniquely small in population but large in daily commuter population due to many federal agencies being headquartered there.
+
+### Data Subsetting and Reformatting
+```{r data_subset, include=TRUE}
+drop_states = c(
+  "American Samoa", 
+  "Diamond Princess", 
+  "District of Columbia", 
+  "Grand Princess", 
+  "Guam",
+  "Northern Mariana Islands",
+  "Puerto Rico",
+  "Virgin Islands")
+
+c_US = subset(c_US, !(Province_State %in% drop_states))
+d_US = subset(d_US, !(Province_State %in% drop_states))
+
+#analysis_day is used rather than a pull of the last column for reproducibility
+#if this were not used, the results would likely differ from day to day
+analysis_day = "2/12/22"
+
+c_US = c_US[c(seq(1:11),which(names(c_US) == analysis_day))]
+d_US = d_US[c(seq(1:12),which(names(d_US) == analysis_day))]
+
+if(identical(c_US$Combined_Key, d_US$Combined_Key)){
+  print("Check passed: US Case and Deaths combined keys match.")
+}else{
+  print("Error: US Case and Deaths combined keys do not match.")
+}
+```
+### Plotting
+Latitude (of county) is plotted against per capita and per case death rates.
+```{r latitude, include=TRUE}
+lat_deaths = data.frame(d_US$Lat, d_US[,analysis_day]/d_US$Population, d_US$Population, d_US[,analysis_day]/c_US[,analysis_day])
+names(lat_deaths) = c("Latitude", "Deaths_Per_Capita", "Population", "Deaths_Per_Case")
+lat_deaths = na.omit(lat_deaths)
+lat_deaths = lat_deaths[is.finite(rowSums(lat_deaths)),]
+```
+```{r latitude_plots, include=TRUE}
+plot(
+  x = lat_deaths$Latitude,
+  y = lat_deaths$Deaths_Per_Capita,
+  xlab = "Latitude (Degrees)",
+  ylab = "COVID Deaths Per Capita",
+  main = "Latitude vs. COVID Deaths Per Capita by County")
+plot(
+  x = lat_deaths$Latitude,
+  y = lat_deaths$Deaths_Per_Case,
+  xlab = "Latitude (Degrees)",
+  ylab = "COVID Deaths Per Case",
+  main = "Latitude vs. COVID Deaths Per Case by County")
+
+```
+
+### Modeling
+Surprisingly, latitude appears to be negatively correlated with both per capita and per case death rates (accpimtomg for 11.58% and 9.62% of variance, respectively).
+Building a multiple regression which incorporates population totals as well may provide some additional insight and predictive power when modeling.
+```{r latitude_models, include=TRUE}
+fit1 = lm(Deaths_Per_Capita~Latitude+Population, data = lat_deaths)
+summary(fit1)
+fit2 = lm(Deaths_Per_Case~Latitude+Population, data = lat_deaths)
+summary(fit2)
+```
+### Bias Identification and Mitigation
+I believe the geographic regions I dropped from this analysis were reasonable to drop due to regulatory heterogeneity and other factors associated with non-state areas of the US.
+There may be bias introduced into my model by the dropping of missing data which was a requirement for linear models to build correctly.
+Bias which could have been introduced by including latitudes south of the equator was avoided by only analyzing the US data, but this introduces a US-centric bias.
+Considering that the results I found were the opposite of what I'd anticipated prior to visualizing and analyzing the data, I'd say any biases I had were unlikely to have altered the results.
